@@ -28,7 +28,7 @@ func main() {
 	}
 
 	// Load configuration
-	config, err := LoadConfig()
+	config, err := LoadConfig(currentDir)
 	if err != nil {
 		log.Printf("Error loading configuration: %v", err)
 		log.Println("Using default behavior...")
