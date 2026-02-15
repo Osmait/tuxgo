@@ -184,6 +184,30 @@ func GetSessionName(workDir string) string {
 	return sessionName
 }
 
+// ListSessions returns a list of all active tmux sessions
+func ListSessions() ([]string, error) {
+	args := append(TmuxBaseArgs(), "list-sessions", "-F", "#{session_name}")
+	cmd := exec.Command("tmux", args...)
+	output, err := cmd.Output()
+	if err != nil {
+		// If there's an error (no sessions), return empty slice
+		return []string{}, nil
+	}
+
+	sessions := strings.Split(strings.TrimSpace(string(output)), "\n")
+	if len(sessions) == 1 && sessions[0] == "" {
+		return []string{}, nil
+	}
+
+	return sessions, nil
+}
+
+// AttachToSession attaches to an existing session by name
+func AttachToSession(sessionName string) error {
+	session := &TmuxSession{Name: sessionName}
+	return session.AttachSession()
+}
+
 // ValidateConfig validates that the configuration has valid windows
 func ValidateConfig(config *ProjectConfig) error {
 	if config == nil {

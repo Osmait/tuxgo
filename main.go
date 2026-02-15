@@ -1,12 +1,26 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"os"
 )
 
 func main() {
+	// Parse command line flags
+	listFlag := flag.Bool("l", false, "List active tmux sessions and attach to one")
+	listLongFlag := flag.Bool("list", false, "List active tmux sessions and attach to one")
+	flag.Parse()
+
+	// Handle list flag - show sessions and let user choose
+	if *listFlag || *listLongFlag {
+		if err := listAndSelectSession(); err != nil {
+			log.Fatalf("Error: %v", err)
+		}
+		return
+	}
+
 	// Get current working directory
 	currentDir, err := os.Getwd()
 	if err != nil {
@@ -89,6 +103,37 @@ func main() {
 	if err := session.AttachSession(); err != nil {
 		log.Fatalf("Error attaching to tmux session: %v", err)
 	}
+}
+
+// listAndSelectSession lists all active sessions using an interactive TUI
+func listAndSelectSession() error {
+	sessions, err := ListSessions()
+	if err != nil {
+		return fmt.Errorf("failed to list sessions: %v", err)
+	}
+
+	if len(sessions) == 0 {
+		fmt.Println("No active tmux sessions found.")
+		return nil
+	}
+
+	// Use TUI to select session
+	selectedSession, ok, err := SelectSessionTUI(sessions)
+	if err != nil {
+		return fmt.Errorf("TUI error: %v", err)
+	}
+
+	if !ok {
+		fmt.Println("No session selected.")
+		return nil
+	}
+
+	// Attach to selected session
+	if err := AttachToSession(selectedSession); err != nil {
+		return fmt.Errorf("error attaching to session: %v", err)
+	}
+
+	return nil
 }
 
 // createWindow creates a window according to its configuration
