@@ -1,0 +1,137 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"gopkg.in/yaml.v3"
+)
+
+// Config represents the complete configuration file structure
+type Config struct {
+	Default  ProjectConfig   `yaml:"default"`
+	Projects []ProjectConfig `yaml:"projects"`
+}
+
+// ProjectConfig represents a project configuration
+// If Pattern is empty, it's considered the default configuration
+type ProjectConfig struct {
+	Pattern string         `yaml:"pattern,omitempty"`
+	Windows []WindowConfig `yaml:"windows"`
+}
+
+// WindowConfig represents a window configuration
+type WindowConfig struct {
+	Name    string   `yaml:"name"`
+	Command string   `yaml:"command,omitempty"` // For simple window (single panel)
+	Layout  string   `yaml:"layout,omitempty"`  // "horizontal" or "vertical"
+	Panels  []string `yaml:"panels,omitempty"`  // Commands for multiple panels
+}
+
+// GetConfigPath returns the path to the configuration file
+func GetConfigPath() string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(homeDir, ".config", "tuxgo", "config.yaml")
+}
+
+// EnsureConfigDir creates the configuration directory if it doesn't exist
+func EnsureConfigDir() error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("error getting home directory: %v", err)
+	}
+
+	configDir := filepath.Join(homeDir, ".config", "tuxgo")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return fmt.Errorf("error creating configuration directory: %v", err)
+	}
+
+	return nil
+}
+
+// LoadConfig loads the YAML configuration file
+// Returns nil without error if the file doesn't exist
+func LoadConfig() (*Config, error) {
+	configPath := GetConfigPath()
+
+	// Check if file exists
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		return nil, nil
+	}
+
+	// Read the file
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("error reading configuration file: %v", err)
+	}
+
+	// Parse YAML
+	var config Config
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("error parsing YAML: %v", err)
+	}
+
+	return &config, nil
+}
+
+// SaveDefaultConfig creates a configuration file with default values
+func SaveDefaultConfig() error {
+	configPath := GetConfigPath()
+
+	// Check if it already exists
+	if _, err := os.Stat(configPath); err == nil {
+		return nil // Already exists, don't overwrite
+	}
+
+	// Create directory if it doesn't exist
+	if err := EnsureConfigDir(); err != nil {
+		return err
+	}
+
+	defaultConfig := `# TuxGo Configuration
+# This file defines custom configurations for tmux sessions
+
+# Default configuration (optional)
+# Used when no project matches
+# default:
+#   windows:
+#     - name: editor
+#       command: "nvim ."
+#     - name: opencode
+#       command: "opencode"
+
+# Specific projects
+# Each project has a pattern (glob) compared with the current path
+# First match wins
+# projects:
+#   - pattern: "*/my-go-project"
+#     windows:
+#       - name: editor
+#         command: "nvim ."
+#       - name: server
+#         layout: horizontal  # or "vertical"
+#         panels:
+#           - command: "go run ."
+#           - command: "tail -f logs/app.log"
+#
+#   - pattern: "*/frontend-*"
+#     windows:
+#       - name: editor
+#         command: "nvim ."
+#       - name: dev
+#         layout: vertical
+#         panels:
+#           - command: "npm run dev"
+#           - command: "npm test"
+`
+
+	if err := os.WriteFile(configPath, []byte(defaultConfig), 0644); err != nil {
+		return fmt.Errorf("error writing configuration file: %v", err)
+	}
+
+	return nil
+}
