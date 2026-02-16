@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 
-	"github.com/josesaulburgos/tuxgo/internal/config"
+	"github.com/Osmait/tuxgo/internal/config"
 )
 
 // CreateWindow creates a new window in the session

@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/josesaulburgos/tuxgo/internal/tmux"
-	"github.com/josesaulburgos/tuxgo/internal/tui"
+	"github.com/Osmait/tuxgo/internal/tmux"
+	"github.com/Osmait/tuxgo/internal/tui"
 )
 
 var listCmd = &cobra.Command{

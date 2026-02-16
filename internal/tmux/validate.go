@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/josesaulburgos/tuxgo/internal/config"
+	"github.com/Osmait/tuxgo/internal/config"
 )
 
 // ValidateConfig validates that the configuration has valid windows

@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/josesaulburgos/tuxgo/internal/config"
-	"github.com/josesaulburgos/tuxgo/internal/matcher"
-	"github.com/josesaulburgos/tuxgo/internal/tmux"
+	"github.com/Osmait/tuxgo/internal/config"
+	"github.com/Osmait/tuxgo/internal/matcher"
+	"github.com/Osmait/tuxgo/internal/tmux"
 )
 
 var rootCmd = &cobra.Command{

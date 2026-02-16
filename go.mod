@@ -1,4 +1,4 @@
-module github.com/josesaulburgos/tuxgo
+module github.com/Osmait/tuxgo
 
 go 1.25.6
 

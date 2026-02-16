@@ -3,7 +3,7 @@ package matcher
 import (
 	"testing"
 
-	"github.com/josesaulburgos/tuxgo/internal/config"
+	"github.com/Osmait/tuxgo/internal/config"
 )
 
 func TestMatchPattern_SimpleWildcard(t *testing.T) {

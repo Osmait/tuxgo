@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/josesaulburgos/tuxgo/internal/config"
+	"github.com/Osmait/tuxgo/internal/config"
 )
 
 // FindMatchingProject searches for the first project whose pattern matches the current path.

@@ -1,7 +1,7 @@
 BINARY   := tuxgo
 PKG      := ./cmd/tuxgo
 VERSION  := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-LDFLAGS  := -ldflags "-s -w -X github.com/josesaulburgos/tuxgo/internal/cli.Version=$(VERSION)"
+LDFLAGS  := -ldflags "-s -w -X github.com/Osmait/tuxgo/internal/cli.Version=$(VERSION)"
 
 .PHONY: build install test clean lint fmt vet release release-dry next-version tag
 

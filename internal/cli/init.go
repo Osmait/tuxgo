@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/josesaulburgos/tuxgo/internal/config"
+	"github.com/Osmait/tuxgo/internal/config"
 )
 
 var initCmd = &cobra.Command{

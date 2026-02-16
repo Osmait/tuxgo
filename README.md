@@ -17,7 +17,7 @@ A tmux session manager that automatically creates and configures tmux sessions b
 
 ### From GitHub Releases (recommended)
 
-Download the latest binary for your platform from the [Releases page](https://github.com/josesaulburgos/tuxgo/releases).
+Download the latest binary for your platform from the [Releases page](https://github.com/Osmait/tuxgo/releases).
 
 ```bash
 # Example for macOS arm64
@@ -28,7 +28,7 @@ sudo mv tuxgo /usr/local/bin/
 ### From source with `go install`
 
 ```bash
-go install github.com/josesaulburgos/tuxgo/cmd/tuxgo@latest
+go install github.com/Osmait/tuxgo/cmd/tuxgo@latest
 ```
 
 Make sure `$HOME/go/bin` is in your PATH:
@@ -44,7 +44,7 @@ export PATH="$HOME/go/bin:$PATH"
 ### Build from source
 
 ```bash
-git clone https://github.com/josesaulburgos/tuxgo.git
+git clone https://github.com/Osmait/tuxgo.git
 cd tuxgo
 make install
 ```
