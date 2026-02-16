@@ -15,6 +15,18 @@ A tmux session manager that automatically creates and configures tmux sessions b
 
 ## Installation
 
+### From GitHub Releases (recommended)
+
+Download the latest binary for your platform from the [Releases page](https://github.com/josesaulburgos/tuxgo/releases).
+
+```bash
+# Example for macOS arm64
+tar -xzf tuxgo_*_darwin_arm64.tar.gz
+sudo mv tuxgo /usr/local/bin/
+```
+
+### From source with `go install`
+
 ```bash
 go install github.com/josesaulburgos/tuxgo/cmd/tuxgo@latest
 ```
@@ -29,7 +41,7 @@ fish_add_path $HOME/go/bin
 export PATH="$HOME/go/bin:$PATH"
 ```
 
-Or build from source:
+### Build from source
 
 ```bash
 git clone https://github.com/josesaulburgos/tuxgo.git
@@ -187,6 +199,9 @@ You can nest further for more complex layouts:
 
 ```
 tuxgo/
+  .github/
+    workflows/
+      release.yml               # CI: auto-release on tag push
   cmd/
     tuxgo/
       main.go                 # Entry point
@@ -195,6 +210,7 @@ tuxgo/
       root.go                 # Root command (create/attach session)
       init.go                 # 'tuxgo init' subcommand
       list.go                 # 'tuxgo list' subcommand
+      version.go              # 'tuxgo version' subcommand
     config/
       config.go               # Config structs and YAML parsing
       loader.go               # Config file discovery and loading
@@ -212,6 +228,7 @@ tuxgo/
       matcher_test.go
     tui/
       session_picker.go       # Interactive session selector (Bubble Tea)
+  .goreleaser.yaml
   Makefile
   go.mod
   go.sum
@@ -222,15 +239,44 @@ tuxgo/
 ## Development
 
 ```bash
-make build      # Compile binary
-make install    # Install to $GOPATH/bin
-make test       # Run all tests
-make fmt        # Format code
-make vet        # Run go vet
-make lint       # Run golangci-lint
-make clean      # Remove build artifacts
-make help       # Show all targets
+make build          # Compile binary
+make install        # Install to $GOPATH/bin
+make test           # Run all tests
+make fmt            # Format code
+make vet            # Run go vet
+make lint           # Run golangci-lint
+make clean          # Remove build artifacts
+make next-version   # Show next version based on conventional commits
+make release-dry    # Test goreleaser locally (no publish)
+make release        # Tag + push to trigger GitHub Actions release
+make help           # Show all targets
 ```
+
+## Releases
+
+Releases are fully automated using [Conventional Commits](https://www.conventionalcommits.org/), [GoReleaser](https://goreleaser.com/), and GitHub Actions.
+
+### How it works
+
+1. Write commits using conventional commit format (see below)
+2. Run `make release` -- this analyzes commits since the last tag, determines the version bump, creates a git tag, and pushes it
+3. GitHub Actions triggers on the tag push, runs tests, and uses GoReleaser to build cross-platform binaries and publish a GitHub Release
+
+### Conventional Commits
+
+Format: `<type>(<optional scope>): <description>`
+
+| Prefix | Version bump | Example |
+|--------|-------------|---------|
+| `fix:` | Patch (0.0.x) | `fix: handle empty config gracefully` |
+| `feat:` | Minor (0.x.0) | `feat: add session renaming support` |
+| `feat!:` or `BREAKING CHANGE` | Major (x.0.0) | `feat!: change config format` |
+| `docs:` | -- | `docs: update installation guide` |
+| `chore:` | -- | `chore: update dependencies` |
+| `refactor:` | -- | `refactor: extract session logic` |
+| `test:` | -- | `test: add matcher edge cases` |
+
+Only `feat`, `fix`, and breaking changes affect the version. Other types are valid conventional commits but do not trigger a version bump on their own -- a `fix:` or `feat:` commit must also be present.
 
 ## How It Works
 
