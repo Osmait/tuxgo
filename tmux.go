@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -61,7 +62,7 @@ func (t *TmuxSession) CreateWindow(name string) error {
 	return nil
 }
 
-// SendKeys sends keys/command to a specific window
+// SendKeys sends keys/command to a specific window or panel
 func (t *TmuxSession) SendKeys(target, keys string) error {
 	// Target can be "window_name" or "window_name.0" for specific panel
 	targetFull := fmt.Sprintf("%s:%s", t.Name, target)
@@ -92,6 +93,91 @@ func (t *TmuxSession) SplitWindow(windowName, layout string) error {
 	cmd.Dir = t.WorkDir
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("error splitting window '%s': %v", windowName, err)
+	}
+	return nil
+}
+
+// SplitPane splits a specific pane and returns the new pane index
+func (t *TmuxSession) SplitPane(windowName string, paneIndex int, layout string) (int, error) {
+	// Get list of panes before split
+	panesBefore, err := t.ListPanes(windowName)
+	if err != nil {
+		return -1, err
+	}
+
+	target := fmt.Sprintf("%s:%s.%d", t.Name, windowName, paneIndex)
+	args := append(TmuxBaseArgs(), "split-window", "-t", target)
+
+	if layout == "horizontal" {
+		args = append(args, "-h")
+	} else {
+		args = append(args, "-v")
+	}
+
+	cmd := exec.Command("tmux", args...)
+	cmd.Dir = t.WorkDir
+	if err := cmd.Run(); err != nil {
+		return -1, fmt.Errorf("error splitting pane %d in window '%s': %v", paneIndex, windowName, err)
+	}
+
+	// Get list of panes after split and find the new one
+	panesAfter, err := t.ListPanes(windowName)
+	if err != nil {
+		return -1, err
+	}
+
+	// Find the new pane (the one that wasn't in panesBefore)
+	for _, pane := range panesAfter {
+		found := false
+		for _, beforePane := range panesBefore {
+			if pane == beforePane {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return pane, nil
+		}
+	}
+
+	return -1, fmt.Errorf("could not determine new pane index")
+}
+
+// ListPanes returns a list of pane indices in a window
+func (t *TmuxSession) ListPanes(windowName string) ([]int, error) {
+	target := fmt.Sprintf("%s:%s", t.Name, windowName)
+	args := append(TmuxBaseArgs(), "list-panes", "-t", target, "-F", "#{pane_index}")
+	cmd := exec.Command("tmux", args...)
+	cmd.Dir = t.WorkDir
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("error listing panes: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	var panes []int
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		idx, err := strconv.Atoi(strings.TrimSpace(line))
+		if err != nil {
+			continue
+		}
+		panes = append(panes, idx)
+	}
+
+	return panes, nil
+}
+
+// SelectPane selects a specific pane by index
+func (t *TmuxSession) SelectPane(windowName string, paneIndex int) error {
+	target := fmt.Sprintf("%s:%s.%d", t.Name, windowName, paneIndex)
+	args := append(TmuxBaseArgs(), "select-pane", "-t", target)
+	cmd := exec.Command("tmux", args...)
+	cmd.Dir = t.WorkDir
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("error selecting pane %d: %v", paneIndex, err)
 	}
 	return nil
 }
@@ -143,12 +229,19 @@ func (t *TmuxSession) AttachSession() error {
 }
 
 // CreateWindowWithPanels creates a window with multiple panels and executes commands
+// Supports both legacy flat layouts and new hierarchical mixed layouts
 func (t *TmuxSession) CreateWindowWithPanels(config WindowConfig) error {
 	// Create the window
 	if err := t.CreateWindow(config.Name); err != nil {
 		return err
 	}
 
+	// Check if using new hierarchical layout (Root field)
+	if config.Root != nil {
+		return t.createHierarchicalLayout(config.Name, config.Root)
+	}
+
+	// Legacy flat layout support
 	if len(config.Panels) == 0 {
 		return nil
 	}
@@ -170,6 +263,78 @@ func (t *TmuxSession) CreateWindowWithPanels(config WindowConfig) error {
 		panelTarget := fmt.Sprintf("%s.%d", config.Name, i)
 		if err := t.SendKeys(panelTarget, command); err != nil {
 			return err
+		}
+	}
+
+	return nil
+}
+
+// createHierarchicalLayout creates a hierarchical/mixed layout using a binary tree.
+//
+// Rules:
+//   - A node with children is a CONTAINER: it defines a split direction and its
+//     children occupy the resulting panes. Any "command" on a container is ignored.
+//   - A node without children is a LEAF: its "command" is executed in its pane.
+//   - The first child inherits the parent's pane (no split needed).
+//   - The second child is created by splitting the parent's pane.
+//   - Maximum 2 children per node (binary split).
+func (t *TmuxSession) createHierarchicalLayout(windowName string, root *PanelConfig) error {
+	// Map to track paneIndex -> command for leaf nodes
+	commands := make(map[int]string)
+
+	type queueItem struct {
+		paneIndex int
+		panel     *PanelConfig
+	}
+
+	// Start with root at pane 0 (already exists after CreateWindow)
+	queue := []queueItem{{paneIndex: 0, panel: root}}
+
+	for len(queue) > 0 {
+		item := queue[0]
+		queue = queue[1:]
+
+		parentPaneIndex := item.paneIndex
+		parentPanel := item.panel
+
+		// LEAF node: no children, just record the command
+		if len(parentPanel.Children) == 0 {
+			if parentPanel.Command != "" {
+				commands[parentPaneIndex] = parentPanel.Command
+			}
+			continue
+		}
+
+		// CONTAINER node: has children, split direction applies
+		splitDir := parentPanel.Split
+		if splitDir != "horizontal" && splitDir != "vertical" {
+			splitDir = "horizontal"
+		}
+
+		// First child inherits the parent pane (no split)
+		firstChild := parentPanel.Children[0]
+		firstChildCopy := firstChild
+		queue = append(queue, queueItem{paneIndex: parentPaneIndex, panel: &firstChildCopy})
+
+		// Second child (if exists) is created by splitting the parent pane
+		if len(parentPanel.Children) == 2 {
+			secondChild := parentPanel.Children[1]
+
+			newPaneIndex, err := t.SplitPane(windowName, parentPaneIndex, splitDir)
+			if err != nil {
+				return err
+			}
+
+			secondChildCopy := secondChild
+			queue = append(queue, queueItem{paneIndex: newPaneIndex, panel: &secondChildCopy})
+		}
+	}
+
+	// Send all commands to their respective panes
+	for paneIndex, command := range commands {
+		target := fmt.Sprintf("%s.%d", windowName, paneIndex)
+		if err := t.SendKeys(target, command); err != nil {
+			return fmt.Errorf("error sending command to pane %d: %v", paneIndex, err)
 		}
 	}
 
@@ -223,14 +388,74 @@ func ValidateConfig(config *ProjectConfig) error {
 			return fmt.Errorf("window without name defined")
 		}
 
-		// Validate that it has command or panels, not both
-		if window.Command != "" && len(window.Panels) > 0 {
-			log.Printf("Warning: window '%s' has both 'command' and 'panels', using 'panels'", window.Name)
+		// Count configuration types
+		hasCommand := window.Command != ""
+		hasPanels := len(window.Panels) > 0
+		hasRoot := window.Root != nil
+
+		configCount := 0
+		if hasCommand {
+			configCount++
+		}
+		if hasPanels {
+			configCount++
+		}
+		if hasRoot {
+			configCount++
 		}
 
-		// Validate layout if there are multiple panels
-		if len(window.Panels) > 1 && window.Layout != "horizontal" && window.Layout != "vertical" {
-			return fmt.Errorf("window '%s' has multiple panels but invalid layout: '%s' (use 'horizontal' or 'vertical')", window.Name, window.Layout)
+		if configCount == 0 {
+			return fmt.Errorf("window '%s' has no configuration (need 'command', 'panels', or 'root')", window.Name)
+		}
+
+		if configCount > 1 {
+			log.Printf("Warning: window '%s' has multiple configurations, using 'root' > 'panels' > 'command'", window.Name)
+		}
+
+		// Validate legacy layout if using flat panels
+		if hasPanels && !hasRoot {
+			if len(window.Panels) > 1 && window.Layout != "horizontal" && window.Layout != "vertical" {
+				return fmt.Errorf("window '%s' has multiple panels but invalid layout: '%s' (use 'horizontal' or 'vertical')", window.Name, window.Layout)
+			}
+		}
+
+		// Validate hierarchical root structure
+		if hasRoot {
+			if err := validatePanelConfig(window.Root, window.Name); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// validatePanelConfig recursively validates a panel configuration
+func validatePanelConfig(panel *PanelConfig, windowName string) error {
+	if panel == nil {
+		return nil
+	}
+
+	// Validate split direction if children exist
+	if len(panel.Children) > 0 {
+		if panel.Split != "" && panel.Split != "horizontal" && panel.Split != "vertical" {
+			return fmt.Errorf("invalid split direction '%s' in window '%s' (use 'horizontal' or 'vertical')", panel.Split, windowName)
+		}
+
+		if len(panel.Children) > 2 {
+			return fmt.Errorf("panel in window '%s' has more than 2 children (maximum 2 for binary splits)", windowName)
+		}
+
+		// Warn if a container node also has a command (it will be ignored)
+		if panel.Command != "" {
+			log.Printf("Warning: panel in window '%s' has both 'command' and 'children'; command will be ignored (move it to a child)", windowName)
+		}
+
+		// Recursively validate children
+		for i := range panel.Children {
+			if err := validatePanelConfig(&panel.Children[i], windowName); err != nil {
+				return err
+			}
 		}
 	}
 

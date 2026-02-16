@@ -23,10 +23,18 @@ type ProjectConfig struct {
 
 // WindowConfig represents a window configuration
 type WindowConfig struct {
-	Name    string   `yaml:"name"`
-	Command string   `yaml:"command,omitempty"` // For simple window (single panel)
-	Layout  string   `yaml:"layout,omitempty"`  // "horizontal" or "vertical"
-	Panels  []string `yaml:"panels,omitempty"`  // Commands for multiple panels
+	Name    string       `yaml:"name"`
+	Command string       `yaml:"command,omitempty"` // For simple window (single panel)
+	Layout  string       `yaml:"layout,omitempty"`  // "horizontal" or "vertical" (legacy, for flat layouts)
+	Panels  []string     `yaml:"panels,omitempty"`  // Commands for multiple panels (legacy, flat layouts)
+	Root    *PanelConfig `yaml:"root,omitempty"`    // Root panel for mixed/hierarchical layouts
+}
+
+// PanelConfig represents a single panel that can have children (for mixed layouts)
+type PanelConfig struct {
+	Command  string        `yaml:"command,omitempty"`  // Command to run in this panel
+	Split    string        `yaml:"split,omitempty"`    // "horizontal" or "vertical" split for children
+	Children []PanelConfig `yaml:"children,omitempty"` // Child panels (up to 2 for binary splits)
 }
 
 // GetConfigPath returns the path to the global configuration file
@@ -182,6 +190,55 @@ func SaveDefaultConfig() error {
 
 	if err := os.WriteFile(configPath, []byte(defaultConfig), 0644); err != nil {
 		return fmt.Errorf("error writing configuration file: %v", err)
+	}
+
+	return nil
+}
+
+// InitLocalConfig creates a .tuxgo.yaml file in the current directory
+func InitLocalConfig(workDir string) error {
+	configPath := filepath.Join(workDir, ".tuxgo.yaml")
+
+	// Check if it already exists
+	if _, err := os.Stat(configPath); err == nil {
+		return fmt.Errorf("configuration file already exists: %s", configPath)
+	}
+
+	localConfig := `# TuxGo Local Configuration
+# This file defines tmux windows for this specific project
+# Place this file as .tuxgo.yaml in your project root
+
+windows:
+  - name: editor
+    command: "nvim ."
+
+  # Example: Simple multi-panel layout (flat)
+  # - name: dev
+  #   layout: horizontal  # or "vertical"
+  #   panels:
+  #     - "go run ."
+  #     - "tail -f logs/app.log"
+
+  # Example: Mixed layout (hierarchical)
+  # Creates:┌───────────────┬──────────┐
+  #         │               │ panel 2  │
+  #         │   panel 1     ├──────────┤
+  #         │  (opencode)   │ panel 3  │
+  #         │               │  (ls)    │
+  #         └───────────────┴──────────┘
+  # - name: mixed
+  #   root:
+  #     split: "horizontal"
+  #     children:
+  #       - command: "opencode"
+  #       - split: "vertical"
+  #         children:
+  #           - command: "htop"
+  #           - command: "ls -la"
+`
+
+	if err := os.WriteFile(configPath, []byte(localConfig), 0644); err != nil {
+		return fmt.Errorf("error writing local configuration file: %v", err)
 	}
 
 	return nil

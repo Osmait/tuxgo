@@ -11,7 +11,23 @@ func main() {
 	// Parse command line flags
 	listFlag := flag.Bool("l", false, "List active tmux sessions and attach to one")
 	listLongFlag := flag.Bool("list", false, "List active tmux sessions and attach to one")
+	initFlag := flag.Bool("init", false, "Initialize a local .tuxgo.yaml configuration file")
 	flag.Parse()
+
+	// Handle init flag - create local config file
+	if *initFlag {
+		currentDir, err := os.Getwd()
+		if err != nil {
+			log.Fatalf("Error getting current directory: %v", err)
+		}
+
+		if err := InitLocalConfig(currentDir); err != nil {
+			log.Fatalf("Error: %v", err)
+		}
+		fmt.Println("Created .tuxgo.yaml configuration file in current directory")
+		fmt.Println("Edit it to customize your tmux session")
+		return
+	}
 
 	// Handle list flag - show sessions and let user choose
 	if *listFlag || *listLongFlag {
@@ -30,24 +46,13 @@ func main() {
 	// Load configuration
 	config, err := LoadConfig(currentDir)
 	if err != nil {
-		log.Printf("Error loading configuration: %v", err)
-		log.Println("Using default behavior...")
-		config = nil
-	}
-
-	// If configuration doesn't exist, create example file
-	if config == nil {
-		if err := SaveDefaultConfig(); err != nil {
-			log.Printf("Error creating default configuration: %v", err)
-		} else {
-			fmt.Printf("Example configuration created at: %s\n", GetConfigPath())
-		}
+		log.Fatalf("Error loading configuration: %v", err)
 	}
 
 	// Determine which configuration to use
 	var projectConfig *ProjectConfig
 
-	// 1. Search for match in configured projects
+	// 1. Search for match in configured projects (for global config)
 	if config != nil {
 		projectConfig = FindMatchingProject(config, currentDir)
 	}
@@ -57,9 +62,20 @@ func main() {
 		projectConfig = GetDefaultConfig(config)
 	}
 
-	// 3. If no configuration, use hardcoded default
+	// 3. If no configuration found, show error and exit
 	if projectConfig == nil {
-		projectConfig = getHardcodedDefault()
+		fmt.Println("No configuration found for this project.")
+		fmt.Println()
+		fmt.Println("To get started, create a configuration file:")
+		fmt.Println()
+		fmt.Println("Option 1 - Local project config (recommended):")
+		fmt.Println("  Create .tuxgo.yaml in this directory with your project settings")
+		fmt.Println()
+		fmt.Println("Option 2 - Global config:")
+		fmt.Printf("  Create %s\n", GetConfigPath())
+		fmt.Println()
+		fmt.Println("Run 'tuxgo --init' to create an example local config.")
+		os.Exit(1)
 	}
 
 	// Validate configuration
@@ -138,8 +154,8 @@ func listAndSelectSession() error {
 
 // createWindow creates a window according to its configuration
 func createWindow(session *TmuxSession, window WindowConfig) error {
-	// If it has panels, create window with layout
-	if len(window.Panels) > 0 {
+	// If it has panels or root layout, create window with layout
+	if len(window.Panels) > 0 || window.Root != nil {
 		return session.CreateWindowWithPanels(window)
 	}
 
@@ -153,21 +169,4 @@ func createWindow(session *TmuxSession, window WindowConfig) error {
 	}
 
 	return nil
-}
-
-// getHardcodedDefault returns the hardcoded default configuration
-// Used when there's no configuration file
-func getHardcodedDefault() *ProjectConfig {
-	return &ProjectConfig{
-		Windows: []WindowConfig{
-			{
-				Name:    "editor",
-				Command: "nvim .",
-			},
-			{
-				Name:    "opencode",
-				Command: "opencode",
-			},
-		},
-	}
 }
