@@ -69,7 +69,7 @@ func matchDoubleStar(pattern, path string) bool {
 	// Special case: ** at the beginning
 	if strings.HasPrefix(pattern, "**/") {
 		suffix := pattern[3:] // Remove "**/"
-		return strings.HasSuffix(path, suffix) || strings.Contains(path, "/"+suffix)
+		return matchSuffixWithWildcards(path, suffix)
 	}
 
 	// Special case: ** at the end
@@ -92,6 +92,29 @@ func matchDoubleStar(pattern, path string) bool {
 	}
 
 	pathWithoutPrefix := path[len(prefix):]
-	return strings.HasSuffix(pathWithoutPrefix, suffix) ||
-		strings.Contains(pathWithoutPrefix, "/"+suffix)
+	return matchSuffixWithWildcards(pathWithoutPrefix, suffix)
+}
+
+// matchSuffixWithWildcards checks if path ends with pattern, handling wildcards
+func matchSuffixWithWildcards(path, pattern string) bool {
+	// Split pattern by / to handle each segment
+	patternSegments := strings.Split(pattern, "/")
+	pathSegments := strings.Split(path, "/")
+
+	// Pattern can't have more segments than path
+	if len(patternSegments) > len(pathSegments) {
+		return false
+	}
+
+	// Check if the last N segments of path match the pattern segments
+	offset := len(pathSegments) - len(patternSegments)
+	for i, patternSeg := range patternSegments {
+		pathSeg := pathSegments[offset+i]
+		matched, err := filepath.Match(patternSeg, pathSeg)
+		if err != nil || !matched {
+			return false
+		}
+	}
+
+	return true
 }
