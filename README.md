@@ -144,56 +144,199 @@ projects:
     - "tail -f app.log"
 ```
 
-#### Hierarchical layout (mixed splits)
+### Hierarchical Layout Guide
 
-Use `root` with nested `children` for complex arrangements. Each node is either a **container** (has `split` + `children`) or a **leaf** (has `command`). Containers can have up to 2 children.
+For complex multi-pane arrangements, use `root` with nested `children`. This is a **binary tree** model where you describe how to recursively split the screen.
+
+#### Key concepts
+
+There are only two types of nodes:
+
+| Node type | Has | Does |
+|-----------|-----|------|
+| **Container** | `split` + `children` | Splits the space in two. Does NOT run a command. |
+| **Leaf** | `command` | Runs a command. Does NOT split. |
+
+**Rules:**
+- `split: "horizontal"` divides the space into **left** and **right**
+- `split: "vertical"` divides the space into **top** and **bottom**
+- Each container has exactly **2 children** (binary split)
+- The first child gets the **left/top** portion
+- The second child gets the **right/bottom** portion
+- Children can be either leaves (run a command) or containers (split further)
+
+#### How to think about it
+
+Think of it as **recursively cutting a rectangle**:
+
+1. Start with the full window as one rectangle
+2. Decide: do I want to split this rectangle horizontally (left|right) or vertically (top/bottom)?
+3. For each half: is it a final pane (leaf with command) or do I need to split it again (container)?
+
+#### Example 1: Editor with side panel
+
+Split horizontally: editor on the left, terminal on the right.
+
+```yaml
+- name: dev
+  root:
+    split: "horizontal"           # cut left | right
+    children:
+      - command: "nvim ."         # left: editor
+      - command: "npm run dev"    # right: terminal
+```
+
+```
++-------------+-----------+
+|             |           |
+|    nvim     |  npm run  |
+|             |           |
++-------------+-----------+
+```
+
+#### Example 2: Editor with stacked side panels
+
+Split horizontally first, then split the right side vertically.
 
 ```yaml
 - name: workspace
   root:
-    split: "horizontal"
+    split: "horizontal"              # step 1: cut left | right
     children:
-      - command: "nvim ."           # left pane
-      - split: "vertical"          # right side, split vertically
+      - command: "nvim ."            # left: editor (leaf)
+      - split: "vertical"            # right: split again top / bottom
         children:
-          - command: "htop"         # top-right pane
-          - command: "watch date"   # bottom-right pane
+          - command: "htop"          #   top-right: htop
+          - command: "watch date"    #   bottom-right: watch
 ```
 
-This produces:
+How to read this:
 
 ```
-+---------------+----------+
-|               |   htop   |
-|     nvim      +----------+
-|               |  watch   |
-+---------------+----------+
+Step 1: horizontal split        Step 2: vertical split on right
++-------------+-----------+     +-------------+-----------+
+|             |           |     |             |   htop    |
+|    nvim     |   (right) | --> |    nvim     +-----------+
+|             |           |     |             |   watch   |
++-------------+-----------+     +-------------+-----------+
 ```
 
-You can nest further for more complex layouts:
+#### Example 3: 2x2 grid
+
+Split horizontally, then split each side vertically.
 
 ```yaml
-- name: complex
+- name: grid
+  root:
+    split: "horizontal"              # step 1: left | right
+    children:
+      - split: "vertical"            # step 2: split left into top / bottom
+        children:
+          - command: "nvim ."        #   top-left
+          - command: "make watch"    #   bottom-left
+      - split: "vertical"            # step 3: split right into top / bottom
+        children:
+          - command: "htop"          #   top-right
+          - command: "tail -f app.log" # bottom-right
+```
+
+```
+Step 1: horizontal     Step 2: split left    Step 3: split right
++--------+--------+    +--------+--------+   +--------+--------+
+|        |        |    |  nvim  |        |   |  nvim  |  htop  |
+| (left) |(right) | -> +--------+ (right)| ->+--------+--------+
+|        |        |    |  make  |        |   |  make  |  tail  |
++--------+--------+    +--------+--------+   +--------+--------+
+```
+
+#### Example 4: Main editor with three side panels
+
+Split horizontally, then the right side vertically into three (requires nesting two vertical splits).
+
+```yaml
+- name: ide
   root:
     split: "horizontal"
     children:
-      - split: "vertical"
+      - command: "nvim ."                  # left: large editor
+      - split: "vertical"                  # right: split into top / bottom
         children:
-          - command: "nvim ."
-          - command: "make watch"
-      - split: "vertical"
-        children:
-          - command: "htop"
-          - command: "tail -f app.log"
+          - command: "go run ."            #   top-right: server
+          - split: "vertical"              #   bottom-right: split again
+            children:
+              - command: "go test ./..."   #     middle-right: tests
+              - command: "lazygit"         #     bottom-right: git
 ```
 
 ```
-+----------+----------+
-|   nvim   |   htop   |
-+----------+----------+
-|   make   |   tail   |
-+----------+----------+
++----------------+-----------+
+|                |  go run   |
+|                +-----------+
+|      nvim      |  go test  |
+|                +-----------+
+|                |  lazygit  |
++----------------+-----------+
 ```
+
+#### Example 5: Top bar with bottom panels
+
+Split vertically first (top/bottom), then the bottom horizontally (left/right).
+
+```yaml
+- name: monitor
+  root:
+    split: "vertical"                    # step 1: top / bottom
+    children:
+      - command: "htop"                  # top: full-width htop
+      - split: "horizontal"              # bottom: split left | right
+        children:
+          - command: "watch df -h"       #   bottom-left: disk
+          - command: "tail -f /var/log/syslog" # bottom-right: logs
+```
+
+```
++---------------------------+
+|           htop            |
++-------------+-------------+
+|   watch df  |  tail logs  |
++-------------+-------------+
+```
+
+#### Example 6: Three columns
+
+Split horizontally, then split one side horizontally again.
+
+```yaml
+- name: columns
+  root:
+    split: "horizontal"
+    children:
+      - command: "nvim ."                # left column
+      - split: "horizontal"              # right side: split into 2 columns
+        children:
+          - command: "go run ."          #   middle column
+          - command: "lazygit"           #   right column
+```
+
+```
++---------+---------+---------+
+|         |         |         |
+|  nvim   | go run  | lazygit |
+|         |         |         |
++---------+---------+---------+
+```
+
+#### Quick reference
+
+| Want this | Root split | Children |
+|-----------|-----------|----------|
+| Left \| Right | `horizontal` | 2 leaves |
+| Top / Bottom | `vertical` | 2 leaves |
+| Left \| (Top-Right / Bottom-Right) | `horizontal` | leaf + vertical container |
+| (Top-Left / Bottom-Left) \| Right | `horizontal` | vertical container + leaf |
+| 2x2 grid | `horizontal` | 2 vertical containers |
+| 3 columns | `horizontal` | leaf + horizontal container |
+| 3 rows | `vertical` | leaf + vertical container |
 
 ## Project Structure
 
