@@ -1,18 +1,20 @@
-package main
+package matcher
 
 import (
 	"path/filepath"
 	"strings"
+
+	"github.com/josesaulburgos/tuxgo/internal/config"
 )
 
-// FindMatchingProject searches for the first project whose pattern matches the current path
-// Returns nil if no match is found
-func FindMatchingProject(config *Config, currentPath string) *ProjectConfig {
-	if config == nil {
+// FindMatchingProject searches for the first project whose pattern matches the current path.
+// Returns nil if no match is found.
+func FindMatchingProject(cfg *config.Config, currentPath string) *config.ProjectConfig {
+	if cfg == nil {
 		return nil
 	}
 
-	for _, project := range config.Projects {
+	for _, project := range cfg.Projects {
 		if MatchPattern(project.Pattern, currentPath) {
 			return &project
 		}
@@ -21,8 +23,17 @@ func FindMatchingProject(config *Config, currentPath string) *ProjectConfig {
 	return nil
 }
 
-// MatchPattern checks if a path matches a glob pattern
-// Supports wildcards like *, **, ?
+// GetDefaultConfig returns the default configuration from the config file.
+// Returns nil if no default is defined.
+func GetDefaultConfig(cfg *config.Config) *config.ProjectConfig {
+	if cfg == nil || len(cfg.Default.Windows) == 0 {
+		return nil
+	}
+	return &cfg.Default
+}
+
+// MatchPattern checks if a path matches a glob pattern.
+// Supports wildcards like *, **, and ?.
 func MatchPattern(pattern, path string) bool {
 	if pattern == "" {
 		return false
@@ -38,7 +49,6 @@ func MatchPattern(pattern, path string) bool {
 	}
 
 	// For simple patterns, use filepath.Match
-	// We need to compare either the final directory name or the full path
 	matched, err := filepath.Match(pattern, path)
 	if err == nil && matched {
 		return true
@@ -71,7 +81,6 @@ func matchDoubleStar(pattern, path string) bool {
 	// ** in the middle - split and search
 	parts := strings.Split(pattern, "/**/")
 	if len(parts) != 2 {
-		// Multiple ** not supported in simple implementation
 		return false
 	}
 
@@ -85,12 +94,4 @@ func matchDoubleStar(pattern, path string) bool {
 	pathWithoutPrefix := path[len(prefix):]
 	return strings.HasSuffix(pathWithoutPrefix, suffix) ||
 		strings.Contains(pathWithoutPrefix, "/"+suffix)
-}
-
-// GetDefaultConfig returns the default configuration
-func GetDefaultConfig(config *Config) *ProjectConfig {
-	if config == nil || len(config.Default.Windows) == 0 {
-		return nil
-	}
-	return &config.Default
 }
