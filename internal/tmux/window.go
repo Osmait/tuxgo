@@ -84,29 +84,38 @@ func (s *Session) SetupPanels(cfg config.WindowConfig) error {
 //   - The first child inherits the parent's pane (no split needed).
 //   - The second child is created by splitting the parent's pane.
 //   - Maximum 2 children per node (binary split).
+//
+// Uses stable pane IDs (%N) instead of pane indices to avoid issues when
+// indices shift after splits.
 func (s *Session) createHierarchicalLayout(windowName string, root *config.PanelConfig) error {
-	// Map to track paneIndex -> command for leaf nodes
-	commands := make(map[int]string)
-
-	type queueItem struct {
-		paneIndex int
-		panel     *config.PanelConfig
+	// Get the stable pane ID for the initial pane (index 0)
+	initialPaneID, err := s.GetPaneID(windowName, 0)
+	if err != nil {
+		return fmt.Errorf("error getting initial pane ID: %v", err)
 	}
 
-	// Start with root at pane 0 (already exists after CreateWindow)
-	queue := []queueItem{{paneIndex: 0, panel: root}}
+	// Map to track paneID -> command for leaf nodes
+	commands := make(map[string]string)
+
+	type queueItem struct {
+		paneID string
+		panel  *config.PanelConfig
+	}
+
+	// Start with root at the initial pane
+	queue := []queueItem{{paneID: initialPaneID, panel: root}}
 
 	for len(queue) > 0 {
 		item := queue[0]
 		queue = queue[1:]
 
-		parentPaneIndex := item.paneIndex
+		parentPaneID := item.paneID
 		parentPanel := item.panel
 
 		// LEAF node: no children, just record the command
 		if len(parentPanel.Children) == 0 {
 			if parentPanel.Command != "" {
-				commands[parentPaneIndex] = parentPanel.Command
+				commands[parentPaneID] = parentPanel.Command
 			}
 			continue
 		}
@@ -120,27 +129,27 @@ func (s *Session) createHierarchicalLayout(windowName string, root *config.Panel
 		// First child inherits the parent pane (no split)
 		firstChild := parentPanel.Children[0]
 		firstChildCopy := firstChild
-		queue = append(queue, queueItem{paneIndex: parentPaneIndex, panel: &firstChildCopy})
+		queue = append(queue, queueItem{paneID: parentPaneID, panel: &firstChildCopy})
 
 		// Second child (if exists) is created by splitting the parent pane
 		if len(parentPanel.Children) == 2 {
 			secondChild := parentPanel.Children[1]
 
-			newPaneIndex, err := s.SplitPane(windowName, parentPaneIndex, splitDir)
+			newPaneID, err := s.SplitPane(windowName, parentPaneID, splitDir)
 			if err != nil {
 				return err
 			}
 
 			secondChildCopy := secondChild
-			queue = append(queue, queueItem{paneIndex: newPaneIndex, panel: &secondChildCopy})
+			queue = append(queue, queueItem{paneID: newPaneID, panel: &secondChildCopy})
 		}
 	}
 
 	// Send all commands to their respective panes
-	for paneIndex, command := range commands {
-		target := fmt.Sprintf("%s.%d", windowName, paneIndex)
-		if err := s.SendKeys(target, command); err != nil {
-			return fmt.Errorf("error sending command to pane %d: %v", paneIndex, err)
+	for paneID, command := range commands {
+		target := fmt.Sprintf("%s:%s.%s", s.Name, windowName, paneID)
+		if err := s.SendKeysDirect(target, command); err != nil {
+			return fmt.Errorf("error sending command to pane %s: %v", paneID, err)
 		}
 	}
 
