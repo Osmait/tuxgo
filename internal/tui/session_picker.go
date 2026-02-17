@@ -112,10 +112,10 @@ func SelectSession(sessions []string) (string, bool, error) {
 	l := list.New(items, sessionItemDelegate{}, defaultWidth, listHeight)
 	l.Title = "Select a tmux session"
 	l.SetShowStatusBar(false)
+	l.SetShowHelp(false)
 	l.SetFilteringEnabled(true)
 	l.Styles.Title = titleStyle
 	l.Styles.PaginationStyle = paginationStyle
-	l.Styles.HelpStyle = helpStyle
 
 	m := sessionSelectorModel{list: l}
 

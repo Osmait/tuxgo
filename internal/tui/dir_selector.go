@@ -116,10 +116,10 @@ func SelectDirectory(items []DirItem) (string, bool, error) {
 	l := list.New(listItems, dirItemDelegate{}, defaultWidth, listHeight)
 	l.Title = "Select a directory"
 	l.SetShowStatusBar(false)
+	l.SetShowHelp(false)
 	l.SetFilteringEnabled(true)
 	l.Styles.Title = titleStyle
 	l.Styles.PaginationStyle = paginationStyle
-	l.Styles.HelpStyle = helpStyle
 
 	m := dirSelectorModel{list: l}
 
