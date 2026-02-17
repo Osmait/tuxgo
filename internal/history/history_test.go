@@ -63,52 +63,70 @@ func TestFuzzyMatchScore(t *testing.T) {
 }
 
 func TestHistoryAdd(t *testing.T) {
-	h := &History{Entries: []Entry{}}
+	h := newTestHistory(t)
+	defer h.Close()
 
-	h.Add("/home/user/my-project")
-
-	if len(h.Entries) != 1 {
-		t.Fatalf("Expected 1 entry, got %d", len(h.Entries))
+	if err := h.Add("/home/user/my-project"); err != nil {
+		t.Fatalf("Add failed: %v", err)
 	}
 
-	if h.Entries[0].Name != "my-project" {
-		t.Errorf("Expected name 'my-project', got %s", h.Entries[0].Name)
+	entries, err := h.GetAll()
+	if err != nil {
+		t.Fatalf("GetAll failed: %v", err)
 	}
 
-	if h.Entries[0].UseCount != 1 {
-		t.Errorf("Expected UseCount 1, got %d", h.Entries[0].UseCount)
+	if len(entries) != 1 {
+		t.Fatalf("Expected 1 entry, got %d", len(entries))
+	}
+
+	if entries[0].Name != "my-project" {
+		t.Errorf("Expected name 'my-project', got %s", entries[0].Name)
+	}
+
+	if entries[0].UseCount != 1 {
+		t.Errorf("Expected UseCount 1, got %d", entries[0].UseCount)
 	}
 }
 
 func TestHistoryAddExisting(t *testing.T) {
-	h := &History{
-		Entries: []Entry{
-			{Path: "/home/user/my-project", Name: "my-project", UseCount: 5},
-		},
+	h := newTestHistory(t)
+	defer h.Close()
+
+	if err := h.Add("/home/user/my-project"); err != nil {
+		t.Fatalf("First Add failed: %v", err)
 	}
 
-	h.Add("/home/user/my-project")
-
-	if len(h.Entries) != 1 {
-		t.Fatalf("Expected 1 entry, got %d", len(h.Entries))
+	if err := h.Add("/home/user/my-project"); err != nil {
+		t.Fatalf("Second Add failed: %v", err)
 	}
 
-	if h.Entries[0].UseCount != 6 {
-		t.Errorf("Expected UseCount 6, got %d", h.Entries[0].UseCount)
+	entries, err := h.GetAll()
+	if err != nil {
+		t.Fatalf("GetAll failed: %v", err)
+	}
+
+	if len(entries) != 1 {
+		t.Fatalf("Expected 1 entry, got %d", len(entries))
+	}
+
+	if entries[0].UseCount != 2 {
+		t.Errorf("Expected UseCount 2, got %d", entries[0].UseCount)
 	}
 }
 
 func TestHistorySearch(t *testing.T) {
-	now := time.Now()
-	h := &History{
-		Entries: []Entry{
-			{Path: "/home/user/my-project", Name: "my-project", LastUsed: now, UseCount: 5},
-			{Path: "/home/user/my-app", Name: "my-app", LastUsed: now.Add(-24 * time.Hour), UseCount: 3},
-			{Path: "/home/user/other-dir", Name: "other-dir", LastUsed: now, UseCount: 1},
-		},
-	}
+	h := newTestHistory(t)
+	defer h.Close()
 
-	results := h.Search("myproj")
+	now := time.Now()
+	insertTestEntry(t, h, "/home/user/my-project", "my-project", now, 5)
+	insertTestEntry(t, h, "/home/user/my-app", "my-app", now.Add(-24*time.Hour), 3)
+	insertTestEntry(t, h, "/home/user/other-dir", "other-dir", now, 1)
+
+	results, err := h.Search("myproj")
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
 
 	if len(results) != 1 {
 		t.Errorf("Expected 1 result for 'myproj', got %d", len(results))
@@ -120,15 +138,17 @@ func TestHistorySearch(t *testing.T) {
 }
 
 func TestHistorySearchMultiple(t *testing.T) {
-	now := time.Now()
-	h := &History{
-		Entries: []Entry{
-			{Path: "/home/user/my-project", Name: "my-project", LastUsed: now, UseCount: 5},
-			{Path: "/home/user/my-app", Name: "my-app", LastUsed: now.Add(-24 * time.Hour), UseCount: 10},
-		},
-	}
+	h := newTestHistory(t)
+	defer h.Close()
 
-	results := h.Search("my")
+	now := time.Now()
+	insertTestEntry(t, h, "/home/user/my-project", "my-project", now, 5)
+	insertTestEntry(t, h, "/home/user/my-app", "my-app", now.Add(-24*time.Hour), 10)
+
+	results, err := h.Search("my")
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
 
 	if len(results) != 2 {
 		t.Errorf("Expected 2 results for 'my', got %d", len(results))
@@ -140,13 +160,15 @@ func TestHistorySearchMultiple(t *testing.T) {
 }
 
 func TestHistorySearchNoMatch(t *testing.T) {
-	h := &History{
-		Entries: []Entry{
-			{Path: "/home/user/my-project", Name: "my-project", UseCount: 5},
-		},
-	}
+	h := newTestHistory(t)
+	defer h.Close()
 
-	results := h.Search("xyz")
+	insertTestEntry(t, h, "/home/user/my-project", "my-project", time.Now(), 5)
+
+	results, err := h.Search("xyz")
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
 
 	if len(results) != 0 {
 		t.Errorf("Expected 0 results for 'xyz', got %d", len(results))
@@ -154,15 +176,17 @@ func TestHistorySearchNoMatch(t *testing.T) {
 }
 
 func TestHistorySearchEmptyPattern(t *testing.T) {
-	now := time.Now()
-	h := &History{
-		Entries: []Entry{
-			{Path: "/home/user/project-a", Name: "project-a", LastUsed: now, UseCount: 5},
-			{Path: "/home/user/project-b", Name: "project-b", LastUsed: now.Add(-48 * time.Hour), UseCount: 10},
-		},
-	}
+	h := newTestHistory(t)
+	defer h.Close()
 
-	results := h.Search("")
+	now := time.Now()
+	insertTestEntry(t, h, "/home/user/project-a", "project-a", now, 5)
+	insertTestEntry(t, h, "/home/user/project-b", "project-b", now.Add(-48*time.Hour), 10)
+
+	results, err := h.Search("")
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
 
 	if len(results) != 2 {
 		t.Errorf("Expected 2 results for empty pattern, got %d", len(results))
@@ -170,21 +194,27 @@ func TestHistorySearchEmptyPattern(t *testing.T) {
 }
 
 func TestHistoryRemove(t *testing.T) {
-	h := &History{
-		Entries: []Entry{
-			{Path: "/home/user/my-project", Name: "my-project"},
-			{Path: "/home/user/other", Name: "other"},
-		},
+	h := newTestHistory(t)
+	defer h.Close()
+
+	insertTestEntry(t, h, "/home/user/my-project", "my-project", time.Now(), 5)
+	insertTestEntry(t, h, "/home/user/other", "other", time.Now(), 3)
+
+	if err := h.Remove("/home/user/my-project"); err != nil {
+		t.Fatalf("Remove failed: %v", err)
 	}
 
-	h.Remove("/home/user/my-project")
-
-	if len(h.Entries) != 1 {
-		t.Errorf("Expected 1 entry after remove, got %d", len(h.Entries))
+	entries, err := h.GetAll()
+	if err != nil {
+		t.Fatalf("GetAll failed: %v", err)
 	}
 
-	if len(h.Entries) > 0 && h.Entries[0].Name != "other" {
-		t.Errorf("Expected remaining entry to be 'other', got %s", h.Entries[0].Name)
+	if len(entries) != 1 {
+		t.Errorf("Expected 1 entry after remove, got %d", len(entries))
+	}
+
+	if len(entries) > 0 && entries[0].Name != "other" {
+		t.Errorf("Expected remaining entry to be 'other', got %s", entries[0].Name)
 	}
 }
 
@@ -237,62 +267,37 @@ func TestCalculateFrequencyScore(t *testing.T) {
 	}
 }
 
-func TestHistorySaveAndLoad(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "tuxgo-history-test-*")
+func newTestHistory(t *testing.T) *History {
+	t.Helper()
+
+	tmpDir, err := os.MkdirTemp("", "tuxgo-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
 
 	oldHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Cleanup(func() {
+		os.Setenv("HOME", oldHome)
+		os.RemoveAll(tmpDir)
+	})
 
-	h1 := &History{
-		Entries: []Entry{
-			{Path: "/home/user/project", Name: "project", LastUsed: time.Now(), UseCount: 5},
-		},
-	}
-
-	if err := h1.Save(); err != nil {
-		t.Fatalf("Failed to save history: %v", err)
-	}
-
-	h2, err := Load()
+	h, err := Load()
 	if err != nil {
 		t.Fatalf("Failed to load history: %v", err)
 	}
 
-	if len(h2.Entries) != 1 {
-		t.Errorf("Expected 1 entry after load, got %d", len(h2.Entries))
-	}
-
-	if h2.Entries[0].Path != "/home/user/project" {
-		t.Errorf("Expected path '/home/user/project', got %s", h2.Entries[0].Path)
-	}
+	return h
 }
 
-func TestLoadNoFile(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "tuxgo-history-test-*")
+func insertTestEntry(t *testing.T, h *History, path, name string, lastUsed time.Time, useCount int) {
+	t.Helper()
+
+	_, err := h.db.Exec(`
+		INSERT INTO history (path, name, last_used, use_count)
+		VALUES (?, ?, ?, ?)
+	`, path, name, lastUsed, useCount)
 	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
-
-	h, err := Load()
-	if err != nil {
-		t.Fatalf("Load() returned error when file doesn't exist: %v", err)
-	}
-
-	if h == nil {
-		t.Error("Load() returned nil history")
-	}
-
-	if len(h.Entries) != 0 {
-		t.Errorf("Expected empty history, got %d entries", len(h.Entries))
+		t.Fatalf("Failed to insert test entry: %v", err)
 	}
 }

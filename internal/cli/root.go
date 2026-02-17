@@ -38,9 +38,9 @@ func Execute() {
 func runRoot(cmd *cobra.Command, args []string) {
 	h, err := history.Load()
 	if err != nil {
-		log.Printf("Warning: could not load history: %v", err)
-		h = &history.History{Entries: []history.Entry{}}
+		log.Fatalf("Error loading history: %v", err)
 	}
+	defer h.Close()
 
 	var currentDir string
 
@@ -130,9 +130,8 @@ func runRoot(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	h.Add(currentDir)
-	if err := h.Save(); err != nil {
-		log.Printf("Warning: could not save history: %v", err)
+	if err := h.Add(currentDir); err != nil {
+		log.Printf("Warning: could not update history: %v", err)
 	}
 
 	if err := session.Attach(); err != nil {
@@ -149,7 +148,10 @@ func resolveDirectory(pattern string, h *history.History) (string, error) {
 		return absPath, nil
 	}
 
-	matches := h.Search(pattern)
+	matches, err := h.Search(pattern)
+	if err != nil {
+		return "", fmt.Errorf("error searching history: %v", err)
+	}
 
 	if len(matches) == 0 {
 		return "", fmt.Errorf("no directory found matching '%s' in history", pattern)

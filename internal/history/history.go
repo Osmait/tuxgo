@@ -1,85 +1,54 @@
 package history
 
 import (
+	"database/sql"
 	"math"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 	"unicode"
-
-	"gopkg.in/yaml.v3"
 )
 
 type Entry struct {
-	Path     string    `yaml:"path"`
-	Name     string    `yaml:"name"`
-	LastUsed time.Time `yaml:"last_used"`
-	UseCount int       `yaml:"use_count"`
+	ID       int64
+	Path     string
+	Name     string
+	LastUsed time.Time
+	UseCount int
+}
+
+type ScoredEntry struct {
+	Entry
+	Score float64
 }
 
 type History struct {
-	Entries []Entry `yaml:"entries"`
-}
-
-func GetDataPath() string {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(homeDir, ".local", "share", "tuxgo", "history.yaml")
-}
-
-func ensureDataDir() error {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	dataDir := filepath.Join(homeDir, ".local", "share", "tuxgo")
-	return os.MkdirAll(dataDir, 0755)
+	db *sql.DB
 }
 
 func Load() (*History, error) {
-	path := GetDataPath()
-	if path == "" {
-		return &History{Entries: []Entry{}}, nil
-	}
-
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return &History{Entries: []Entry{}}, nil
-	}
+	db, err := openDB()
 	if err != nil {
 		return nil, err
 	}
 
-	var h History
-	if err := yaml.Unmarshal(data, &h); err != nil {
+	if err := migrateFromYAML(db); err != nil {
+		db.Close()
 		return nil, err
 	}
 
-	if h.Entries == nil {
-		h.Entries = []Entry{}
-	}
-
-	return &h, nil
+	return &History{db: db}, nil
 }
 
-func (h *History) Save() error {
-	if err := ensureDataDir(); err != nil {
-		return err
+func (h *History) Close() error {
+	if h.db != nil {
+		return h.db.Close()
 	}
-
-	data, err := yaml.Marshal(h)
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(GetDataPath(), data, 0644)
+	return nil
 }
 
-func (h *History) Add(path string) {
+func (h *History) Add(path string) error {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		absPath = path
@@ -88,64 +57,74 @@ func (h *History) Add(path string) {
 	name := filepath.Base(absPath)
 	now := time.Now()
 
-	for i, e := range h.Entries {
-		if e.Path == absPath {
-			h.Entries[i].LastUsed = now
-			h.Entries[i].UseCount++
-			return
-		}
-	}
+	_, err = h.db.Exec(`
+		INSERT INTO history (path, name, last_used, use_count)
+		VALUES (?, ?, ?, 1)
+		ON CONFLICT(path) DO UPDATE SET
+			last_used = excluded.last_used,
+			use_count = use_count + 1
+	`, absPath, name, now)
 
-	h.Entries = append(h.Entries, Entry{
-		Path:     absPath,
-		Name:     name,
-		LastUsed: now,
-		UseCount: 1,
-	})
+	return err
 }
 
-func (h *History) Remove(path string) {
+func (h *History) Remove(path string) error {
 	absPath, _ := filepath.Abs(path)
-	for i, e := range h.Entries {
-		if e.Path == absPath {
-			h.Entries = append(h.Entries[:i], h.Entries[i+1:]...)
-			return
-		}
+	_, err := h.db.Exec(`DELETE FROM history WHERE path = ?`, absPath)
+	return err
+}
+
+func (h *History) GetAll() ([]Entry, error) {
+	rows, err := h.db.Query(`
+		SELECT id, path, name, last_used, use_count
+		FROM history
+		ORDER BY last_used DESC
+	`)
+	if err != nil {
+		return nil, err
 	}
+	defer rows.Close()
+
+	var entries []Entry
+	for rows.Next() {
+		var e Entry
+		if err := rows.Scan(&e.ID, &e.Path, &e.Name, &e.LastUsed, &e.UseCount); err != nil {
+			return nil, err
+		}
+		entries = append(entries, e)
+	}
+
+	return entries, rows.Err()
 }
 
-type ScoredEntry struct {
-	Entry
-	Score float64
-}
+func (h *History) Search(pattern string) ([]ScoredEntry, error) {
+	entries, err := h.GetAll()
+	if err != nil {
+		return nil, err
+	}
 
-func (h *History) Search(pattern string) []ScoredEntry {
 	if pattern == "" {
-		return h.getAllSorted()
+		return h.scoreAndSort(entries, ""), nil
 	}
 
 	lowerPattern := strings.ToLower(pattern)
-	var results []ScoredEntry
+	var results []Entry
 
-	for _, e := range h.Entries {
+	for _, e := range entries {
 		name := strings.ToLower(e.Name)
 		if fuzzyMatch(lowerPattern, name) {
-			score := calculateScore(lowerPattern, name, e)
-			results = append(results, ScoredEntry{Entry: e, Score: score})
+			results = append(results, e)
 		}
 	}
 
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Score > results[j].Score
-	})
-
-	return results
+	return h.scoreAndSort(results, lowerPattern), nil
 }
 
-func (h *History) getAllSorted() []ScoredEntry {
-	results := make([]ScoredEntry, len(h.Entries))
-	for i, e := range h.Entries {
-		results[i] = ScoredEntry{Entry: e, Score: calculateScore("", strings.ToLower(e.Name), e)}
+func (h *History) scoreAndSort(entries []Entry, pattern string) []ScoredEntry {
+	results := make([]ScoredEntry, len(entries))
+	for i, e := range entries {
+		score := calculateScore(pattern, strings.ToLower(e.Name), e)
+		results[i] = ScoredEntry{Entry: e, Score: score}
 	}
 
 	sort.Slice(results, func(i, j int) bool {
@@ -221,9 +200,7 @@ func fuzzyMatchScore(pattern, target string) float64 {
 
 func calculateScore(pattern, target string, e Entry) float64 {
 	fuzzyScore := fuzzyMatchScore(pattern, target)
-
 	recencyScore := calculateRecencyScore(e.LastUsed)
-
 	frequencyScore := calculateFrequencyScore(e.UseCount)
 
 	return (fuzzyScore * 10) + (recencyScore * 5) + (frequencyScore * 2)

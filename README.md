@@ -90,7 +90,7 @@ Fuzzy matching is case-insensitive and matches characters in sequence:
 - `mp` matches `myproject`
 - `myproj` matches `my-project`, `my_project`, `myproject`
 
-**History file location**: `~/.local/share/tuxgo/history.yaml`
+**History file location**: `~/.local/share/tuxgo/history.db` (SQLite database)
 
 ### Shell Completions
 
