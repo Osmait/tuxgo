@@ -161,12 +161,17 @@ func resolveDirectory(pattern string, h *history.History) (string, error) {
 		return matches[0].Path, nil
 	}
 
-	paths := make([]string, len(matches))
+	items := make([]tui.DirItem, len(matches))
 	for i, m := range matches {
-		paths[i] = m.Path
+		items[i] = tui.DirItem{
+			Path:     m.Path,
+			Name:     m.Name,
+			UseCount: m.UseCount,
+			LastUsed: m.LastUsed,
+		}
 	}
 
-	selected, ok, err := tui.SelectDirectory(paths)
+	selected, ok, err := tui.SelectDirectory(items)
 	if err != nil {
 		return "", fmt.Errorf("error selecting directory: %v", err)
 	}
