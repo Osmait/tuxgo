@@ -3,22 +3,43 @@ package tui
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
-// sessionItem represents a tmux session in the list
-type sessionItem struct {
-	name string
+type SessionItem struct {
+	Name string
 }
 
-func (i sessionItem) FilterValue() string { return i.name }
-func (i sessionItem) Title() string       { return i.name }
-func (i sessionItem) Description() string { return "" }
+func (i SessionItem) FilterValue() string { return i.Name }
+func (i SessionItem) Title() string       { return i.Name }
+func (i SessionItem) Description() string { return "" }
 
-// sessionSelectorModel is the Bubble Tea model for session selection
+type sessionItemDelegate struct{}
+
+func (d sessionItemDelegate) Height() int                             { return 1 }
+func (d sessionItemDelegate) Spacing() int                            { return 0 }
+func (d sessionItemDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
+func (d sessionItemDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
+	i, ok := listItem.(SessionItem)
+	if !ok {
+		return
+	}
+
+	str := i.Name
+
+	fn := itemStyle.Render
+	if index == m.Index() {
+		fn = func(s ...string) string {
+			return selectedItemStyle.Render("❯ " + s[0])
+		}
+	}
+
+	fmt.Fprint(w, fn(str))
+}
+
 type sessionSelectorModel struct {
 	list     list.Model
 	choice   string
@@ -31,20 +52,24 @@ func (m sessionSelectorModel) Init() tea.Cmd {
 
 func (m sessionSelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.list.SetWidth(msg.Width)
-		return m, nil
-
 	case tea.KeyMsg:
 		switch keypress := msg.String(); keypress {
 		case "q", "ctrl+c":
 			m.quitting = true
 			return m, tea.Quit
 
+		case "j", "down":
+			m.list.CursorDown()
+			return m, nil
+
+		case "k", "up":
+			m.list.CursorUp()
+			return m, nil
+
 		case "enter":
-			i, ok := m.list.SelectedItem().(sessionItem)
+			i, ok := m.list.SelectedItem().(SessionItem)
 			if ok {
-				m.choice = i.name
+				m.choice = i.Name
 			}
 			return m, tea.Quit
 		}
@@ -62,70 +87,39 @@ func (m sessionSelectorModel) View() string {
 	if m.choice != "" {
 		return fmt.Sprintf("Attaching to session '%s'...\n", m.choice)
 	}
-	return "\n" + m.list.View()
+
+	var b strings.Builder
+	b.WriteString("\n")
+	b.WriteString(m.list.View())
+	b.WriteString("\n")
+	b.WriteString(helpStyle.Render("↑/k up • ↓/j down • enter select • q quit"))
+	return b.String()
 }
 
-// sessionItemDelegate customizes how session items are rendered
-type sessionItemDelegate struct{}
-
-func (d sessionItemDelegate) Height() int                             { return 1 }
-func (d sessionItemDelegate) Spacing() int                            { return 0 }
-func (d sessionItemDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
-func (d sessionItemDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
-	i, ok := listItem.(sessionItem)
-	if !ok {
-		return
-	}
-
-	str := i.name
-
-	fn := itemStyle.Render
-	if index == m.Index() {
-		fn = func(s ...string) string {
-			return selectedItemStyle.Render("> " + s[0])
-		}
-	}
-
-	fmt.Fprint(w, fn(str))
-}
-
-// Styles for the TUI
-var (
-	itemStyle         = lipgloss.NewStyle().PaddingLeft(4)
-	selectedItemStyle = lipgloss.NewStyle().PaddingLeft(2).Foreground(lipgloss.Color("#6f03fc"))
-)
-
-// SelectSession shows an interactive TUI to select a tmux session.
-// Returns the selected session name and a boolean indicating if a selection was made.
 func SelectSession(sessions []string) (string, bool, error) {
 	if len(sessions) == 0 {
 		return "", false, nil
 	}
 
-	// Convert sessions to list items
 	items := make([]list.Item, len(sessions))
 	for i, session := range sessions {
-		items[i] = sessionItem{name: session}
+		items[i] = SessionItem{Name: session}
 	}
 
-	// Create list
-	const defaultWidth = 40
+	const defaultWidth = 50
 	const listHeight = 14
 
 	l := list.New(items, sessionItemDelegate{}, defaultWidth, listHeight)
-	l.Title = "Select a tmux session to attach"
+	l.Title = "Select a tmux session"
 	l.SetShowStatusBar(false)
-	l.SetFilteringEnabled(false)
-	l.Styles.Title = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFDF5")).
-		Background(lipgloss.Color("#6f03fc")).
-		Padding(0, 1)
-	l.Styles.PaginationStyle = list.DefaultStyles().PaginationStyle.PaddingLeft(4)
-	l.Styles.HelpStyle = list.DefaultStyles().HelpStyle.PaddingLeft(4).PaddingBottom(1)
+	l.SetShowHelp(false)
+	l.SetFilteringEnabled(true)
+	l.Styles.Title = titleStyle
+	l.Styles.PaginationStyle = paginationStyle
 
 	m := sessionSelectorModel{list: l}
 
-	p := tea.NewProgram(m)
+	p := tea.NewProgram(m, tea.WithAltScreen())
 	finalModel, err := p.Run()
 	if err != nil {
 		return "", false, err

@@ -5,6 +5,7 @@ A tmux session manager that automatically creates and configures tmux sessions b
 ## Features
 
 - **YAML-based configuration** with local (per-project) and global support
+- **Directory navigation** with fuzzy search -- jump to any project from anywhere
 - **Hierarchical panel layouts** for complex split arrangements (horizontal + vertical mixed)
 - **Flat panel layouts** for simple multi-pane windows
 - **Project pattern matching** using glob patterns in global config
@@ -62,12 +63,34 @@ tuxgo
 ## Usage
 
 ```
-tuxgo                # Create/attach to tmux session using config
+tuxgo                # Create/attach to tmux session using config in current directory
+tuxgo <dirname>      # Search for directory, navigate to it, and start session
 tuxgo init           # Create example .tuxgo.yaml in current directory
 tuxgo list           # List active tmux sessions and select one (alias: ls)
 tuxgo completion     # Generate shell completion scripts
 tuxgo help           # Show help
 ```
+
+### Directory Navigation
+
+You can pass a directory name (or partial name) as an argument. TuxGo searches your **history of previously used directories** using fuzzy matching:
+
+1. If one match is found, navigate directly to it
+2. If multiple matches are found, show an interactive selector
+3. Results are sorted by recency and frequency of use
+4. After each session, the directory is saved to history
+
+```bash
+tuxgo myproject      # Finds "my-project", "my_project", "myproject", etc.
+tuxgo api            # Finds directories with "api" in the name
+tuxgo /full/path     # Use absolute path directly (bypasses history)
+```
+
+Fuzzy matching is case-insensitive and matches characters in sequence:
+- `mp` matches `myproject`
+- `myproj` matches `my-project`, `my_project`, `myproject`
+
+**History file location**: `~/.local/share/tuxgo/history.db` (SQLite database)
 
 ### Shell Completions
 
