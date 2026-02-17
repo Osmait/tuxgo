@@ -4,25 +4,31 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
 	"github.com/Osmait/tuxgo/internal/config"
+	"github.com/Osmait/tuxgo/internal/history"
 	"github.com/Osmait/tuxgo/internal/matcher"
 	"github.com/Osmait/tuxgo/internal/tmux"
+	"github.com/Osmait/tuxgo/internal/tui"
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "tuxgo",
+	Use:   "tuxgo [directory]",
 	Short: "A tmux session manager",
 	Long: `TuxGo automatically creates and configures tmux sessions
 based on YAML configuration files. Define your window layouts,
 panel splits, and startup commands once, and TuxGo sets everything
-up for you.`,
-	Run: runRoot,
+up for you.
+
+If a directory name is provided, TuxGo will search for it in your
+history of previously used directories using fuzzy matching.`,
+	Args: cobra.MaximumNArgs(1),
+	Run:  runRoot,
 }
 
-// Execute runs the root command
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -30,32 +36,43 @@ func Execute() {
 }
 
 func runRoot(cmd *cobra.Command, args []string) {
-	// Get current working directory
-	currentDir, err := os.Getwd()
+	h, err := history.Load()
 	if err != nil {
-		log.Fatalf("Error getting current directory: %v", err)
+		log.Printf("Warning: could not load history: %v", err)
+		h = &history.History{Entries: []history.Entry{}}
 	}
 
-	// Load configuration
+	var currentDir string
+
+	if len(args) > 0 {
+		dirArg := args[0]
+		resolvedDir, err := resolveDirectory(dirArg, h)
+		if err != nil {
+			log.Fatalf("Error: %v", err)
+		}
+		currentDir = resolvedDir
+	} else {
+		currentDir, err = os.Getwd()
+		if err != nil {
+			log.Fatalf("Error getting current directory: %v", err)
+		}
+	}
+
 	cfg, err := config.Load(currentDir)
 	if err != nil {
 		log.Fatalf("Error loading configuration: %v", err)
 	}
 
-	// Determine which configuration to use
 	var projectConfig *config.ProjectConfig
 
-	// 1. Search for match in configured projects (for global config)
 	if cfg != nil {
 		projectConfig = matcher.FindMatchingProject(cfg, currentDir)
 	}
 
-	// 2. If no match, use default from YAML
 	if projectConfig == nil && cfg != nil {
 		projectConfig = matcher.GetDefaultConfig(cfg)
 	}
 
-	// 3. If no configuration found, show error and exit
 	if projectConfig == nil {
 		fmt.Println("No configuration found for this project.")
 		fmt.Println()
@@ -71,29 +88,23 @@ func runRoot(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// Validate configuration
 	if err := tmux.ValidateConfig(projectConfig); err != nil {
 		log.Fatalf("Invalid configuration: %v", err)
 	}
 
-	// Create tmux session
 	sessionName := tmux.GetSessionName(currentDir)
 	session := &tmux.Session{
 		Name:    sessionName,
 		WorkDir: currentDir,
 	}
 
-	// Check if session already exists
 	if session.HasSession() {
 		fmt.Printf("Connecting to existing tmux session '%s'...\n", sessionName)
 	} else {
 		fmt.Printf("Creating new tmux session '%s'...\n", sessionName)
 
-		// Create session with first window
 		firstWindow := projectConfig.Windows[0]
 		firstCommand := firstWindow.Command
-		// If first window has panels/root, don't send command via CreateSession
-		// (SetupPanels will handle everything)
 		if len(firstWindow.Panels) > 0 || firstWindow.Root != nil {
 			firstCommand = ""
 		}
@@ -102,40 +113,73 @@ func runRoot(cmd *cobra.Command, args []string) {
 			log.Fatalf("Error creating session: %v", err)
 		}
 
-		// Handle first window panels/root if it has them
 		if len(firstWindow.Panels) > 0 || firstWindow.Root != nil {
 			if err := session.SetupPanels(firstWindow); err != nil {
 				log.Fatalf("Error creating panels for first window '%s': %v", firstWindow.Name, err)
 			}
 		}
 
-		// Create additional windows
 		for _, window := range projectConfig.Windows[1:] {
 			if err := createWindow(session, window); err != nil {
 				log.Fatalf("Error creating window '%s': %v", window.Name, err)
 			}
 		}
 
-		// Select first window
 		if err := session.SelectWindow(firstWindow.Name); err != nil {
 			log.Printf("Error selecting initial window: %v", err)
 		}
 	}
 
-	// Attach to session
+	h.Add(currentDir)
+	if err := h.Save(); err != nil {
+		log.Printf("Warning: could not save history: %v", err)
+	}
+
 	if err := session.Attach(); err != nil {
 		log.Fatalf("Error attaching to tmux session: %v", err)
 	}
 }
 
-// createWindow creates a window according to its configuration
+func resolveDirectory(pattern string, h *history.History) (string, error) {
+	if _, err := os.Stat(pattern); err == nil {
+		absPath, err := filepath.Abs(pattern)
+		if err != nil {
+			return "", fmt.Errorf("error resolving path: %v", err)
+		}
+		return absPath, nil
+	}
+
+	matches := h.Search(pattern)
+
+	if len(matches) == 0 {
+		return "", fmt.Errorf("no directory found matching '%s' in history", pattern)
+	}
+
+	if len(matches) == 1 {
+		return matches[0].Path, nil
+	}
+
+	paths := make([]string, len(matches))
+	for i, m := range matches {
+		paths[i] = m.Path
+	}
+
+	selected, ok, err := tui.SelectDirectory(paths)
+	if err != nil {
+		return "", fmt.Errorf("error selecting directory: %v", err)
+	}
+	if !ok {
+		return "", fmt.Errorf("no directory selected")
+	}
+
+	return selected, nil
+}
+
 func createWindow(session *tmux.Session, window config.WindowConfig) error {
-	// If it has panels or root layout, create window with layout
 	if len(window.Panels) > 0 || window.Root != nil {
 		return session.CreateWindowWithPanels(window)
 	}
 
-	// If it only has command, create simple window
 	if err := session.CreateWindow(window.Name); err != nil {
 		return err
 	}
